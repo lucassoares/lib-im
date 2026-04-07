@@ -74,8 +74,12 @@ async function fetchGitlabProjectId(repoName) {
   return data.id;
 }
 
-function isStableVersion(version) {
-  return /^\d+\.\d+\.\d+$/.test(version) && !version.includes("-beta");
+function isStable(version) {
+  return /^\d+\.\d+\.\d+$/.test(version);
+}
+
+function isBeta(version) {
+  return /^\d+\.\d+\.\d+-beta$/.test(version);
 }
 
 async function main() {
@@ -102,18 +106,19 @@ async function main() {
     }
 
     const allVersions = await fetchPackageVersions(repoName);
-    const stable = allVersions
-      .map((v) => v.name)
-      .filter(isStableVersion)
-      .slice(0, 10);
+    const names = allVersions.map((v) => v.name);
 
-    if (stable.length === 0) {
-      console.warn(`No stable versions found for: ${repoName}`);
+    const stable = names.filter(isStable).slice(0, 10);
+    const beta = names.filter(isBeta).slice(0, 10);
+    const selected = [...stable, ...beta];
+
+    if (selected.length === 0) {
+      console.warn(`No versions found for: ${repoName}`);
       continue;
     }
 
     const csvFileName = `${repoName}.csv`;
-    writeFileSync(csvFileName, stable.map((v) => `${repoName},${v}`).join("\n"));
+    writeFileSync(csvFileName, selected.map((v) => `${repoName},${v}`).join("\n"));
 
     const blockKey = repoName.replace(/-/g, "_");
     const block = [
@@ -133,7 +138,7 @@ async function main() {
     ].join("\n");
 
     configBlocks.push(block);
-    console.log(`${repoName} -> project ${projectId} (${stable.length} versions)`);
+    console.log(`${repoName} -> project ${projectId} (${stable.length} stable, ${beta.length} beta)`);
   }
 
   writeFileSync("config.yml", configBlocks.join("\n\n"));
