@@ -1,0 +1,2 @@
+include:
+  - remote: 'https://gitlab.com/gitlab-org/ci-cd/package-stage/pkgs_importer/-/raw/main/templates/gitlab/.gitlab-ci.yml'
