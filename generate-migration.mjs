@@ -1,14 +1,13 @@
-import { writeFileSync, mkdirSync, rmSync, existsSync } from "fs";
+import { writeFileSync, readFileSync, mkdirSync, rmSync, existsSync } from "fs";
 
 const GITHUB_ORG = process.env.GITHUB_ORG;
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN;
 const GITHUB_USERNAME = process.env.GITHUB_USERNAME;
 const GITLAB_GROUP = process.env.GITLAB_GROUP;
 const GITLAB_TOKEN = process.env.GITLAB_TOKEN;
-const GITLAB_USERNAME = process.env.GITLAB_USERNAME;
 
-if (!GITHUB_ORG || !GITHUB_TOKEN || !GITHUB_USERNAME || !GITLAB_GROUP || !GITLAB_TOKEN || !GITLAB_USERNAME) {
-  console.error("Required: GITHUB_ORG, GITHUB_TOKEN, GITHUB_USERNAME, GITLAB_GROUP, GITLAB_TOKEN, GITLAB_USERNAME");
+if (!GITHUB_ORG || !GITHUB_TOKEN || !GITHUB_USERNAME || !GITLAB_GROUP || !GITLAB_TOKEN) {
+  console.error("Required: GITHUB_ORG, GITHUB_TOKEN, GITHUB_USERNAME, GITLAB_GROUP, GITLAB_TOKEN");
   process.exit(1);
 }
 
@@ -24,10 +23,6 @@ const githubHeaders = {
   Authorization: `Bearer ${GITHUB_TOKEN}`,
   Accept: "application/vnd.github+json",
   "X-GitHub-Api-Version": "2022-11-28",
-};
-
-const gitlabHeaders = {
-  "PRIVATE-TOKEN": GITLAB_TOKEN,
 };
 
 async function fetchGithubPackage(packageName) {
@@ -61,7 +56,7 @@ async function fetchGitlabProjectId(repoName) {
   const encoded = encodeURIComponent(`${GITLAB_GROUP}/${repoName}`);
   const res = await fetch(
     `https://gitlab.com/api/v4/projects/${encoded}`,
-    { headers: gitlabHeaders }
+    { headers: { "PRIVATE-TOKEN": GITLAB_TOKEN } }
   );
   if (res.status === 404) return null;
   if (!res.ok) throw new Error(`GitLab project fetch failed for ${repoName}: ${res.status}`);
@@ -85,21 +80,20 @@ async function downloadNupkg(packageName, version, destPath) {
 
   const buffer = Buffer.from(await res.arrayBuffer());
   writeFileSync(destPath, buffer);
-  return destPath;
 }
 
 async function uploadToGitlab(projectId, nupkgPath) {
-  const fileBuffer = await import("fs").then((fs) => fs.readFileSync(nupkgPath));
+  const fileBuffer = readFileSync(nupkgPath);
   const fileName = nupkgPath.split("/").pop();
 
   const formData = new FormData();
   formData.append("package", new Blob([fileBuffer], { type: "application/octet-stream" }), fileName);
 
   const res = await fetch(
-    `https://gitlab.com/api/v4/projects/${projectId}/packages/nuget/`,
+    `https://gitlab.com/api/v4/projects/${projectId}/packages/nuget/v2`,
     {
       method: "PUT",
-      headers: gitlabHeaders,
+      headers: { "X-NuGet-ApiKey": GITLAB_TOKEN },
       body: formData,
     }
   );
