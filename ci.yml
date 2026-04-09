@@ -1,0 +1,89 @@
+stages:
+  - calculate_version
+  - restore
+  - test
+  - build
+  - pack
+  - publish-version
+  - publish
+
+variables:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: "1"
+  NUGET_PACKAGES: "$CI_PROJECT_DIR/.nuget"
+  NUGET_SOURCE: "https://gitlab.com/api/v4/groups/125542281/-/packages/nuget/index.json"
+  GITLAB_PACKAGE_REGISTRY_USERNAME: gitlab-ci-token
+  GITLAB_PACKAGE_REGISTRY_PASSWORD: $TAG_GITLAB_TOKEN
+
+.calculate_version:
+  stage: calculate_version
+  image: node:20
+  script: 
+    - git clone https://gitlab-ci-token:${TAG_GITLAB_TOKEN}@gitlab.com/tagimf/infrastructure/cloud/test-libs-versions.git
+    - cd test-libs-versions/scripts
+    - npm ci 
+    - VERSION=$(node index.js | grep "VERSION=" | cut -d'=' -f2)
+    - echo "SEMVER=$VERSION" >> $CI_PROJECT_DIR/build.env
+
+  artifacts:
+    reports:
+      dotenv: build.env
+
+.restore:
+  stage: restore
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  script:
+    - dotnet nuget remove source gitlab || true
+    - dotnet nuget add source "$NUGET_SOURCE" --name gitlab --username TAG_GITLAB_TOKEN --password "$TAG_GITLAB_TOKEN" --store-password-in-clear-text || true
+    - dotnet restore
+
+.build:
+  stage: build
+  needs:
+    - job: calculate_version
+      artifacts: true
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  script:
+    - dotnet nuget remove source gitlab || true
+    - dotnet nuget add source "$NUGET_SOURCE" --name gitlab --username TAG_GITLAB_TOKEN --password "$TAG_GITLAB_TOKEN" --store-password-in-clear-text || true
+    - dotnet restore 
+    - dotnet build --configuration release --no-restore -p:Version=$SEMVER
+
+.test:
+  stage: test
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  script:
+    - dotnet nuget remove source gitlab || true
+    - dotnet nuget add source "$NUGET_SOURCE" --name gitlab --username TAG_GITLAB_TOKEN --password "$TAG_GITLAB_TOKEN" --store-password-in-clear-text || true
+    - dotnet test --configuration Release
+
+.pack:
+  stage: pack
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  script: |
+    dotnet nuget remove source gitlab || true
+    dotnet nuget add source "$NUGET_SOURCE" --name gitlab --username TAG_GITLAB_TOKEN --password "$TAG_GITLAB_TOKEN" --store-password-in-clear-text || true
+    dotnet restore 2>&1 | tee > dotnet_restore.log ; cat dotnet_restore.log
+
+    for i in `ls src/**/*.csproj`
+      do 
+      dotnet pack ./$i --configuration Release --output ./publish -p:Version=$SEMVER
+    done
+  artifacts:
+    paths:
+      - "./publish/*.nupkg"
+
+.publish-version:
+  stage: publish-version
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  script: 
+    - dotnet nuget remove source gitlab || true
+    - dotnet nuget add source "$NUGET_SOURCE" --name gitlab --username TAG_GITLAB_TOKEN --password "$TAG_GITLAB_TOKEN" --store-password-in-clear-text || true
+    - dotnet restore
+    - dotnet publish --configuration release --output ./publish -p:Version=$SEMVER
+
+.publish:
+  stage: publish
+  image: mcr.microsoft.com/dotnet/sdk:8.0
+  script:
+    - dotnet nuget push ./publish/*.nupkg --source "$NUGET_SOURCE" --api-key "$TAG_GITLAB_TOKEN"
