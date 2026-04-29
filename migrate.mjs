@@ -138,7 +138,35 @@ function mirrorRepo(repoName) {
   rmSync(mirrorPath, { recursive: true });
 }
 
-function adjustRepo(repoName) {
+async function createMergeRequest(projectId, repoName) {
+  const res = await fetch(
+    `https://${CONFIG.GITLAB_HOST}/api/v4/projects/${projectId}/merge_requests`,
+    {
+      method: "POST",
+      headers: {
+        "PRIVATE-TOKEN": CONFIG.GITLAB_TOKEN,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        source_branch: CONFIG.BRANCH_NAME,
+        target_branch: "develop",
+        title: "chore: migrate from GitHub to GitLab",
+        description: "- Remove .github/ folder\n- Add .gitlab-ci.yml\n- Update nuget.config to GitLab registry",
+        remove_source_branch: true,
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`MR creation failed: ${res.status} - ${text}`);
+  }
+
+  const data = await res.json();
+  return data.web_url;
+}
+
+async function adjustRepo(repoName, projectId) {
   const clonePath = `${CLONE_DIR}\\${repoName}`;
   const gitlabUrl = `https://oauth2:${CONFIG.GITLAB_TOKEN}@${CONFIG.GITLAB_HOST}/${CONFIG.GITLAB_GROUP}/${repoName}.git`;
 
@@ -179,6 +207,9 @@ function adjustRepo(repoName) {
   exec(`git -C "${clonePath}" push origin ${CONFIG.BRANCH_NAME}`);
 
   rmSync(clonePath, { recursive: true });
+
+  const mrUrl = await createMergeRequest(projectId, repoName);
+  return mrUrl;
 }
 
 function isStable(version) {
@@ -257,8 +288,9 @@ async function main() {
 
     process.stdout.write(`  [3/3] Adjusting repo...`);
     try {
-      adjustRepo(repoName);
+      const mrUrl = await adjustRepo(repoName, projectId);
       process.stdout.write(` Done\n`);
+      console.log(`  MR: ${mrUrl}`);
     } catch (err) {
       process.stdout.write(` FAILED\n`);
       console.error(`    ${err.message}`);
